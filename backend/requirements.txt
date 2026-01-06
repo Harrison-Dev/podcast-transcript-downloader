@@ -1,0 +1,19 @@
+# Backend Dependencies
+fastapi>=0.109.0
+uvicorn[standard]>=0.27.0
+python-multipart>=0.0.6
+feedparser>=6.0.10
+aiohttp>=3.9.0
+aiofiles>=23.2.1
+pydantic>=2.5.0
+pydantic-settings>=2.1.0
+websockets>=12.0
+
+# Transcription - CUDA optimized
+faster-whisper>=1.0.0
+# Note: Requires cuDNN and cuBLAS for CUDA support
+# Install with: pip install nvidia-cublas-cu12 nvidia-cudnn-cu12
+
+# Utilities
+python-dateutil>=2.8.2
+opencc-python-reimplemented>=0.1.7
