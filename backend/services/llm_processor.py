@@ -5,11 +5,13 @@ Uses local LLM models to:
 1. Add proper punctuation (。，！？)
 2. Remove filler words (呃、嗯、那個)
 3. Fix grammar and improve readability
+4. Apply custom keyword corrections per podcast
 
 Designed for sequential GPU execution: Whisper releases GPU → LLM uses GPU
 """
 import logging
 import gc
+import json
 from typing import Optional
 from dataclasses import dataclass
 from pathlib import Path
@@ -18,12 +20,37 @@ from config import settings
 
 logger = logging.getLogger(__name__)
 
-# Lazy-loaded client instance
+# Lazy-loaded instances
 _text_polisher = None
+_podcast_keywords = None
 
-# Default model path (user should download GGUF model here)
+# Default paths
 DEFAULT_MODEL_DIR = Path(__file__).parent.parent / "models"
 DEFAULT_MODEL_NAME = "qwen2.5-3b-instruct-q4_k_m.gguf"
+KEYWORDS_FILE = Path(__file__).parent.parent / "data" / "podcast_keywords.json"
+
+
+def load_podcast_keywords() -> dict:
+    """Load podcast keywords from JSON file."""
+    global _podcast_keywords
+    if _podcast_keywords is None:
+        if KEYWORDS_FILE.exists():
+            try:
+                with open(KEYWORDS_FILE, 'r', encoding='utf-8') as f:
+                    _podcast_keywords = json.load(f)
+                logger.info(f"Loaded keywords for {len(_podcast_keywords)} podcasts")
+            except Exception as e:
+                logger.warning(f"Failed to load keywords: {e}")
+                _podcast_keywords = {}
+        else:
+            _podcast_keywords = {}
+    return _podcast_keywords
+
+
+def get_podcast_keywords(show_name: str) -> dict:
+    """Get keywords for a specific podcast."""
+    keywords = load_podcast_keywords()
+    return keywords.get(show_name, {})
 
 
 @dataclass
@@ -35,17 +62,49 @@ class PolishResult:
     error: Optional[str] = None
 
 
-# System prompt for text polishing
-POLISH_SYSTEM_PROMPT = """你是一個專業的中文文字編輯，專門處理 podcast 逐字稿的潤飾工作。
+# Base system prompt for text polishing
+POLISH_SYSTEM_PROMPT_BASE = """你是一個專業的中文文字編輯，專門處理 podcast 逐字稿的潤飾工作。
 
 你的任務是潤飾輸入的文字，遵循以下規則：
 1. 添加適當的標點符號（。，！？、）
-2. 移除重複的語氣詞（呃、嗯、那個、就是、對對對、然後）
-3. 修正明顯的錯別字
-4. 保持說話者的原意和語氣，不要改寫內容
-5. 保持專有名詞不變
+2. 每 200-400 字左右插入一個段落分隔（空行），讓文章更易讀
+3. 移除重複的語氣詞（呃、嗯、那個、就是、對對對、然後）
+4. 修正明顯的錯別字
+5. 保持說話者的原意和語氣，不要改寫內容
+{keywords_section}
+輸出格式要求：
+- 只輸出潤飾後的文字
+- 段落之間用空行分隔
+- 不要加任何解釋或前綴
+- 不要使用 markdown 格式"""
 
-重要：只輸出潤飾後的文字，不要加任何解釋或前綴。不要使用 markdown 格式。"""
+
+def build_system_prompt(show_name: str = None) -> str:
+    """Build system prompt with optional keyword corrections."""
+    keywords_section = ""
+    
+    if show_name:
+        kw = get_podcast_keywords(show_name)
+        if kw:
+            parts = []
+            
+            # Add corrections
+            if kw.get("corrections"):
+                corrections_text = "\n".join(
+                    f"  - {wrong} → {right}" 
+                    for wrong, right in kw["corrections"].items()
+                )
+                parts.append(f"常見錯誤修正：\n{corrections_text}")
+            
+            # Add terms
+            if kw.get("terms"):
+                terms_text = "、".join(kw["terms"])
+                parts.append(f"本節目專有名詞：{terms_text}")
+            
+            if parts:
+                keywords_section = "\n\n" + "\n\n".join(parts) + "\n"
+    
+    return POLISH_SYSTEM_PROMPT_BASE.format(keywords_section=keywords_section)
 
 
 class LlamaCppClient:
@@ -177,12 +236,13 @@ class TextPolisher:
         """Check if text polishing is available."""
         return settings.LLM_ENABLED and self.client.is_available()
     
-    def polish(self, text: str) -> PolishResult:
+    def polish(self, text: str, show_name: str = None) -> PolishResult:
         """
         Polish a single text segment.
         
         Args:
             text: Raw transcript text
+            show_name: Podcast show name for keyword corrections
         
         Returns:
             PolishResult with original and polished text
@@ -195,9 +255,10 @@ class TextPolisher:
         
         try:
             prompt = f"請潤飾以下文字：\n\n{text}"
+            system_prompt = build_system_prompt(show_name)
             polished = self.client.generate(
                 prompt=prompt,
-                system=POLISH_SYSTEM_PROMPT,
+                system=system_prompt,
             )
             
             # Clean up the response
@@ -230,6 +291,7 @@ class TextPolisher:
         self,
         segments: list[dict],
         batch_size: int = None,
+        show_name: str = None,
     ) -> list[dict]:
         """
         Polish multiple transcript segments.
@@ -237,6 +299,7 @@ class TextPolisher:
         Args:
             segments: List of segment dicts with 'text' key
             batch_size: Number of segments to process together
+            show_name: Podcast show name for keyword corrections
         
         Returns:
             Segments with polished text
@@ -258,7 +321,7 @@ class TextPolisher:
             
             # Combine batch texts for single LLM call
             combined_text = "\n---\n".join(seg["text"] for seg in batch if seg.get("text"))
-            result = self.polish(combined_text)
+            result = self.polish(combined_text, show_name=show_name)
             
             if result.success and result.polished != result.original:
                 # Split polished text back into segments

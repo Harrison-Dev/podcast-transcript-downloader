@@ -278,7 +278,7 @@ class PipelineOrchestrator:
                 if polisher.is_available():
                     polished_segments = await loop.run_in_executor(
                         self._executor,
-                        lambda: polisher.polish_segments(result.segments),
+                        lambda: polisher.polish_segments(result.segments, show_name=show_title),
                     )
                     # Reformat with polished segments
                     from services.transcriber import format_transcript_text
