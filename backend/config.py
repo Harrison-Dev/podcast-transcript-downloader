@@ -15,6 +15,20 @@ class Settings(BaseSettings):
     WHISPER_COMPUTE_TYPE: str = "float16"  # float16 for GPU, int8 for lower memory
     CONVERT_TRADITIONAL: bool = True  # Convert Simplified to Traditional Chinese
     
+    # SOTA VAD Parameters (optimized for reducing hallucination and better segmentation)
+    VAD_THRESHOLD: float = 0.5  # Speech probability threshold
+    VAD_MIN_SPEECH_DURATION_MS: int = 250  # Filter out short noises
+    VAD_MIN_SILENCE_DURATION_MS: int = 1500  # Longer silence = better paragraph breaks
+    VAD_SPEECH_PAD_MS: int = 400  # Pad speech chunks for better context
+    
+    # LLM Post-Processing Configuration
+    LLM_ENABLED: bool = True
+    LLM_PROVIDER: Literal["ollama", "none"] = "ollama"
+    LLM_MODEL: str = "qwen3:8b"  # or "mistral", "qwen3:4b"
+    LLM_OLLAMA_HOST: str = "http://localhost:11434"
+    LLM_BATCH_SIZE: int = 5  # Process N segments at a time
+    LLM_TIMEOUT: int = 60  # Request timeout in seconds
+    
     # Pipeline Configuration
     MAX_DOWNLOAD_WORKERS: int = 3
     TRANSCRIBE_WORKERS: int = 1  # Usually 1 due to GPU memory constraints

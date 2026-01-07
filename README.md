@@ -8,10 +8,12 @@ Download podcasts from RSS feeds and automatically transcribe them using **Whisp
 
 - 📡 **RSS Feed Support** - Input any podcast RSS/Atom feed URL
 - 🎙️ **AI Transcription** - Uses faster-whisper with CUDA GPU acceleration
+- 🧠 **LLM Text Polishing** - Local LLM adds punctuation, removes filler words
 - 🚀 **Pipeline Processing** - Parallel downloads, efficient transcription
 - 📁 **Smart File Management** - Auto-organize by show/episode with date
 - ⏭️ **Skip Existing** - Automatically skip already transcribed episodes
 - 🌐 **Web Interface** - Modern React UI with real-time progress updates
+
 
 ## 🛠️ Tech Stack
 
@@ -46,7 +48,19 @@ pip install -r requirements.txt
 
 # Install CUDA libraries for faster-whisper
 pip install nvidia-cublas-cu12 nvidia-cudnn-cu12
+
+# Install LLM for text polishing (optional)
+pip install llama-cpp-python
 ```
+
+### LLM Model Setup (Optional)
+
+For text polishing with punctuation and grammar fixes:
+
+1. Download a GGUF model from [Qwen2.5-3B-Instruct-GGUF](https://huggingface.co/Qwen/Qwen2.5-3B-Instruct-GGUF)
+2. Place `qwen2.5-3b-instruct-q4_k_m.gguf` in `backend/models/`
+
+The app will auto-detect and use the model. Without it, transcription still works but without text polishing.
 
 ### Frontend Setup
 

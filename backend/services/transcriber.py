@@ -44,60 +44,86 @@ def convert_to_traditional(text: str) -> str:
 def format_transcript_text(segments: list[dict], include_timestamps: bool = False) -> str:
     """
     Format transcript with better sentence structure.
-    Groups segments by natural breaks (punctuation, pauses).
+    Creates readable paragraphs by:
+    1. Breaking based on time gaps between segments (pause > 1.5s = new paragraph)
+    2. Breaking at sentence-ending punctuation if available (。！？等)
+    3. Fallback to character count limits
     """
     if not segments:
         return ""
     
+    # Strategy: Use time gaps between segments to create natural paragraphs
+    # If there's a pause > PAUSE_THRESHOLD, start a new paragraph
+    PAUSE_THRESHOLD = 1.5  # seconds - silence gap that indicates paragraph break
+    MAX_PARAGRAPH_CHARS = 500  # Force break if paragraph gets too long
+    MIN_PARAGRAPH_CHARS = 100  # Don't break if paragraph is too short
+    
     paragraphs = []
-    current_paragraph = []
+    current_paragraph_texts = []
+    current_paragraph_start_time = 0
+    current_length = 0
     last_end_time = 0
     
-    for seg in segments:
+    for i, seg in enumerate(segments):
         text = seg["text"].strip()
         if not text:
             continue
         
-        start_time = seg["start"]
+        start_time = seg.get("start", 0)
+        end_time = seg.get("end", 0)
         
-        # Start new paragraph if:
-        # 1. Long pause (> 2 seconds)
-        # 2. Previous text ended with sentence-ending punctuation
-        pause_duration = start_time - last_end_time
+        # Calculate gap from previous segment
+        gap = start_time - last_end_time if i > 0 else 0
         
-        if current_paragraph:
-            prev_text = current_paragraph[-1]["text"]
-            ends_sentence = prev_text and prev_text[-1] in '。！？.!?'
+        # Decide if we should start a new paragraph
+        should_break = False
+        
+        # Break on significant pause (natural paragraph boundary)
+        if gap > PAUSE_THRESHOLD and current_length >= MIN_PARAGRAPH_CHARS:
+            should_break = True
+        
+        # Break if current paragraph is getting too long
+        if current_length + len(text) > MAX_PARAGRAPH_CHARS and current_length >= MIN_PARAGRAPH_CHARS:
+            should_break = True
+        
+        # Also check for sentence-ending punctuation at the end of last segment
+        if current_paragraph_texts:
+            last_text = current_paragraph_texts[-1]
+            if last_text and last_text[-1] in '。！？!?.':
+                if current_length >= MIN_PARAGRAPH_CHARS and current_length + len(text) > MAX_PARAGRAPH_CHARS * 0.7:
+                    should_break = True
+        
+        if should_break and current_paragraph_texts:
+            # Save current paragraph with optional timestamp
+            para_text = "".join(current_paragraph_texts)
+            if include_timestamps:
+                minutes = int(current_paragraph_start_time // 60)
+                seconds = int(current_paragraph_start_time % 60)
+                para_text = f"[{minutes:02d}:{seconds:02d}] {para_text}"
+            paragraphs.append(para_text)
             
-            if pause_duration > 2.0 or (ends_sentence and pause_duration > 0.8):
-                # Save current paragraph
-                if include_timestamps:
-                    para_start = current_paragraph[0]["start"]
-                    minutes = int(para_start // 60)
-                    seconds = int(para_start % 60)
-                    timestamp = f"[{minutes:02d}:{seconds:02d}] "
-                else:
-                    timestamp = ""
-                
-                para_text = "".join(s["text"] for s in current_paragraph)
-                paragraphs.append(timestamp + para_text)
-                current_paragraph = []
+            # Start new paragraph
+            current_paragraph_texts = []
+            current_paragraph_start_time = start_time
+            current_length = 0
         
-        current_paragraph.append(seg)
-        last_end_time = seg["end"]
+        # Add text to current paragraph
+        current_paragraph_texts.append(text)
+        current_length += len(text)
+        last_end_time = end_time
+        
+        # Track start time for first segment of paragraph
+        if len(current_paragraph_texts) == 1:
+            current_paragraph_start_time = start_time
     
     # Don't forget the last paragraph
-    if current_paragraph:
+    if current_paragraph_texts:
+        para_text = "".join(current_paragraph_texts)
         if include_timestamps:
-            para_start = current_paragraph[0]["start"]
-            minutes = int(para_start // 60)
-            seconds = int(para_start % 60)
-            timestamp = f"[{minutes:02d}:{seconds:02d}] "
-        else:
-            timestamp = ""
-        
-        para_text = "".join(s["text"] for s in current_paragraph)
-        paragraphs.append(timestamp + para_text)
+            minutes = int(current_paragraph_start_time // 60)
+            seconds = int(current_paragraph_start_time % 60)
+            para_text = f"[{minutes:02d}:{seconds:02d}] {para_text}"
+        paragraphs.append(para_text)
     
     return "\n\n".join(paragraphs)
 
@@ -177,7 +203,10 @@ class Transcriber:
             beam_size=5,
             vad_filter=True,  # Voice activity detection to skip silence
             vad_parameters=dict(
-                min_silence_duration_ms=500,
+                threshold=settings.VAD_THRESHOLD,
+                min_speech_duration_ms=settings.VAD_MIN_SPEECH_DURATION_MS,
+                min_silence_duration_ms=settings.VAD_MIN_SILENCE_DURATION_MS,
+                speech_pad_ms=settings.VAD_SPEECH_PAD_MS,
             ),
         )
         
@@ -223,6 +252,26 @@ class Transcriber:
         """
         result = self.transcribe(audio_path, language, include_timestamps=True)
         return result.text
+    
+    def unload_model(self):
+        """Explicitly unload Whisper model to free GPU memory."""
+        if self._model is not None:
+            del self._model
+            self._model = None
+            
+            # Force garbage collection
+            import gc
+            gc.collect()
+            
+            # Clear CUDA cache if available
+            try:
+                import torch
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+            except ImportError:
+                pass
+            
+            logger.info("Whisper model unloaded, GPU memory released")
 
 
 def get_transcriber() -> Transcriber:
@@ -231,3 +280,11 @@ def get_transcriber() -> Transcriber:
     if _transcriber is None:
         _transcriber = Transcriber()
     return _transcriber
+
+
+def release_transcriber_gpu():
+    """Release GPU memory used by the transcriber."""
+    global _transcriber
+    if _transcriber is not None:
+        _transcriber.unload_model()
+        logger.info("Transcriber GPU memory released for LLM usage")

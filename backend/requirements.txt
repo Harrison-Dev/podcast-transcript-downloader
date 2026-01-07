@@ -17,3 +17,7 @@ faster-whisper>=1.0.0
 # Utilities
 python-dateutil>=2.8.2
 opencc-python-reimplemented>=0.1.7
+
+# LLM Post-Processing
+llama-cpp-python>=0.3.0
+httpx>=0.27.0

@@ -17,6 +17,7 @@ from services.rss_parser import parse_rss_feed
 from services.downloader import download_with_retry, get_temp_audio_path, cleanup_temp_file
 from services.transcriber import get_transcriber
 from services.file_manager import transcript_exists, save_transcript, get_transcript_path
+from services.llm_processor import get_text_polisher
 from config import settings
 
 logger = logging.getLogger(__name__)
@@ -258,11 +259,43 @@ class PipelineOrchestrator:
                 lambda: transcriber.transcribe(temp_audio_path, job.language),
             )
             
+            # LLM Post-Processing (optional)
+            final_text = result.text
+            if settings.LLM_ENABLED:
+                job.current_episode = EpisodeProgress(
+                    episode_title=episode.title,
+                    status="polishing",
+                    progress=80,
+                    message="Running LLM text polish...",
+                )
+                job._notify_progress()
+                
+                # Release Whisper GPU memory for LLM usage (sequential execution)
+                from services.transcriber import release_transcriber_gpu
+                release_transcriber_gpu()
+                
+                polisher = get_text_polisher()
+                if polisher.is_available():
+                    polished_segments = await loop.run_in_executor(
+                        self._executor,
+                        lambda: polisher.polish_segments(result.segments),
+                    )
+                    # Reformat with polished segments
+                    from services.transcriber import format_transcript_text
+                    final_text = format_transcript_text(polished_segments)
+                    logger.info(f"[{job.job_id}] LLM polishing completed")
+                    
+                    # Release LLM GPU memory
+                    from services.llm_processor import release_polisher_gpu
+                    release_polisher_gpu()
+                else:
+                    logger.warning(f"[{job.job_id}] LLM polishing skipped - Model not available")
+            
             # Save transcript
             output_path = save_transcript(
                 show_title,
                 episode,
-                result.text,
+                final_text,
                 index,
                 job.output_dir,
             )

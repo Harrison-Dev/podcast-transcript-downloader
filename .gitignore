@@ -39,3 +39,11 @@ frontend/dist/
 
 # Whisper cache (large model files)
 # Models are stored in ~/.cache/huggingface/
+
+# LLM Models (GGUF files - do not upload)
+backend/models/*.gguf
+backend/models/*.bin
+*.gguf
+
+# Transcripts
+backend/transcripts/*
