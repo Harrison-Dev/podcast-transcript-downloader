@@ -1,0 +1,11 @@
+venv/
+__pycache__/
+*.pyc
+*.pyo
+.env
+.git/
+*.md
+transcripts/
+temp_audio/
+models/
+*.gguf

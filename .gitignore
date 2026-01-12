@@ -47,3 +47,24 @@ backend/models/*.bin
 
 # Transcripts
 backend/transcripts/*
+transcripts/
+
+# Docker runtime data
+data/
+
+# Reference/Archive files
+better-whisper.zip
+better-whisper-ref/
+
+# Claude Code config
+.claude/
+
+# Old/backup files
+*_old.py
+
+# Test scripts (local testing only)
+test_*.bat
+test_*.py
+
+# Migration planning docs
+MIGRATION_PLAN.md

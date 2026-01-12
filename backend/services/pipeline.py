@@ -1,5 +1,7 @@
 """
 Pipeline Orchestrator - Manage the download-transcribe pipeline with async workers.
+
+Uses containerized Whisper API for transcription and Ollama for LLM polishing.
 """
 import asyncio
 import logging
@@ -15,7 +17,8 @@ from models import (
 )
 from services.rss_parser import parse_rss_feed
 from services.downloader import download_with_retry, get_temp_audio_path, cleanup_temp_file
-from services.transcriber import get_transcriber
+from services.whisper_client import get_whisper_client
+from services.transcriber import format_transcript_text, convert_to_traditional
 from services.file_manager import transcript_exists, save_transcript, get_transcript_path
 from services.llm_processor import get_text_polisher
 from config import settings
@@ -239,7 +242,7 @@ class PipelineOrchestrator:
                 progress_callback=on_download_progress,
             )
             
-            # Transcribe (run in thread pool to not block event loop)
+            # Transcribe via Whisper API container
             job.status = JobStatus.TRANSCRIBING
             job.current_episode = EpisodeProgress(
                 episode_title=episode.title,
@@ -248,48 +251,75 @@ class PipelineOrchestrator:
                 message="Running Whisper AI...",
             )
             job._notify_progress()
-            
+
             logger.info(f"[{job.job_id}] Transcribing: {episode.title}")
-            
+
             loop = asyncio.get_event_loop()
-            transcriber = get_transcriber()
-            
+            whisper_client = get_whisper_client()
+
+            def on_transcribe_progress(pct: float):
+                job.current_episode = EpisodeProgress(
+                    episode_title=episode.title,
+                    status="transcribing",
+                    progress=pct,
+                    message="Running Whisper AI...",
+                )
+                job._notify_progress()
+
             result = await loop.run_in_executor(
                 self._executor,
-                lambda: transcriber.transcribe(temp_audio_path, job.language),
+                lambda: whisper_client.transcribe_sync(
+                    temp_audio_path,
+                    language=job.language,
+                    progress_callback=on_transcribe_progress,
+                ),
             )
-            
-            # LLM Post-Processing (optional)
-            final_text = result.text
+
+            # Convert segments to Traditional Chinese if needed
+            segments = result.segments
+            if result.language in ('zh', 'yue'):
+                for seg in segments:
+                    seg['text'] = convert_to_traditional(seg['text'])
+
+            # Format initial text from segments
+            final_text = format_transcript_text(segments)
+
+            # LLM Post-Processing (optional) via Ollama API
             if settings.LLM_ENABLED:
                 job.current_episode = EpisodeProgress(
                     episode_title=episode.title,
                     status="polishing",
-                    progress=80,
-                    message="Running LLM text polish...",
+                    progress=0,
+                    message="Running LLM text polish (two-pass)...",
                 )
                 job._notify_progress()
-                
-                # Release Whisper GPU memory for LLM usage (sequential execution)
-                from services.transcriber import release_transcriber_gpu
-                release_transcriber_gpu()
-                
+
                 polisher = get_text_polisher()
                 if polisher.is_available():
-                    polished_segments = await loop.run_in_executor(
+                    def on_polish_progress(pct: float):
+                        job.current_episode = EpisodeProgress(
+                            episode_title=episode.title,
+                            status="polishing",
+                            progress=pct,
+                            message="Running LLM text polish...",
+                        )
+                        job._notify_progress()
+
+                    # Two-pass polishing via Ollama
+                    polished_text = await loop.run_in_executor(
                         self._executor,
-                        lambda: polisher.polish_segments(result.segments, show_name=show_title),
+                        lambda: polisher.polish_text(
+                            final_text,
+                            progress_callback=on_polish_progress,
+                        ),
                     )
-                    # Reformat with polished segments
-                    from services.transcriber import format_transcript_text
-                    final_text = format_transcript_text(polished_segments)
-                    logger.info(f"[{job.job_id}] LLM polishing completed")
-                    
-                    # Release LLM GPU memory
-                    from services.llm_processor import release_polisher_gpu
-                    release_polisher_gpu()
+                    if polished_text:
+                        final_text = polished_text
+                        logger.info(f"[{job.job_id}] LLM polishing completed")
+                    else:
+                        logger.warning(f"[{job.job_id}] LLM polishing returned empty result, using original")
                 else:
-                    logger.warning(f"[{job.job_id}] LLM polishing skipped - Model not available")
+                    logger.warning(f"[{job.job_id}] LLM polishing skipped - Ollama not available")
             
             # Save transcript
             output_path = save_transcript(

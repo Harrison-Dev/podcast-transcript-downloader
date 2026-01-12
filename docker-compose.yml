@@ -1,0 +1,184 @@
+# Podcast Transcript Downloader - Docker Compose
+# Full stack: Backend + Whisper API + Ollama LLM
+#
+# Usage:
+#   docker compose up -d                    # Start all services
+#   docker compose up -d backend            # Start only backend
+#   docker compose logs -f                  # View logs
+#   docker compose down                     # Stop services
+#
+# First time setup:
+#   docker compose exec ollama ollama pull qwen3:8b
+
+services:
+  # ========== Backend API Service ==========
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: podcast-backend
+    restart: unless-stopped
+
+    environment:
+      # Whisper API (connect to container)
+      - WHISPER_API=http://whisper-api:8000
+      - WHISPER_MODEL=${WHISPER_MODEL:-large-v3}
+      # Ollama API (connect to container)
+      - OLLAMA_API=http://ollama:11434
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-qwen3:8b}
+      - OLLAMA_TEMPERATURE=0.3
+      - OLLAMA_NUM_PREDICT=4096
+      # LLM Settings
+      - LLM_ENABLED=${LLM_ENABLED:-true}
+      - LLM_TIMEOUT=300
+      - BATCH_SIZE_PASS1=8
+      - BATCH_SIZE_PASS2=20
+      # Server
+      - HOST=0.0.0.0
+      - PORT=8000
+
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+
+    volumes:
+      - ./transcripts:/app/transcripts
+      - ./temp_audio:/app/temp_audio
+      - ./backend/data:/app/data
+
+    depends_on:
+      whisper-api:
+        condition: service_healthy
+      ollama:
+        condition: service_started
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "3"
+
+  # ========== Frontend Service ==========
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: podcast-frontend
+    restart: unless-stopped
+
+    environment:
+      # Use container service name for internal Docker network
+      - VITE_API_HOST=backend
+      - VITE_API_PORT=8000
+
+    ports:
+      - "${FRONTEND_PORT:-5173}:5173"
+
+    depends_on:
+      - backend
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "2"
+
+  # ========== Ollama LLM Service ==========
+  ollama:
+    image: ollama/ollama:latest
+    container_name: podcast-ollama
+    restart: unless-stopped
+
+    # GPU support
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+
+    ports:
+      - "${OLLAMA_PORT:-11434}:11434"
+
+    volumes:
+      - ollama-models:/root/.ollama
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "3"
+
+  # ========== Whisper API Service ==========
+  whisper-api:
+    build:
+      context: ./services/whisper-api
+      dockerfile: Dockerfile
+    container_name: podcast-whisper-api
+    restart: unless-stopped
+
+    # GPU support - requires nvidia-docker
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+    environment:
+      - USE_CUDA=1
+      - PRELOAD_MODEL=${WHISPER_MODEL:-large-v3}
+      - MAX_FILE_SIZE=${MAX_FILE_SIZE:-524288000}
+      - UPLOAD_DIR=/app/uploads
+      - OUTPUT_DIR=/app/outputs
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+
+    ports:
+      - "${WHISPER_PORT:-8207}:8000"
+
+    volumes:
+      - ./data/whisper/uploads:/app/uploads
+      - ./data/whisper/outputs:/app/outputs
+      - ./data/whisper/models:/app/models
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s  # Model loading takes time
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "3"
+
+volumes:
+  ollama-models:
+    name: podcast-ollama-models
+
+networks:
+  default:
+    name: podcast-transcriber-network
+    driver: bridge
