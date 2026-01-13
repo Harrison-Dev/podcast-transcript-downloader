@@ -19,7 +19,7 @@ from services.rss_parser import parse_rss_feed
 from services.downloader import download_with_retry, get_temp_audio_path, cleanup_temp_file
 from services.whisper_client import get_whisper_client
 from services.transcriber import format_transcript_text, convert_to_traditional
-from services.file_manager import transcript_exists, save_transcript, get_transcript_path
+from services.file_manager import transcript_exists, save_transcript, save_raw_transcript, get_transcript_path
 from services.llm_processor import get_text_polisher
 from config import settings
 
@@ -283,6 +283,12 @@ class PipelineOrchestrator:
 
             # Format initial text from segments
             final_text = format_transcript_text(segments)
+
+            # Save raw transcript for debugging (before LLM polishing)
+            raw_path = save_raw_transcript(
+                show_title, episode, final_text, index, job.output_dir
+            )
+            logger.info(f"[{job.job_id}] Raw transcript saved: {raw_path.name}")
 
             # LLM Post-Processing (optional) via Ollama API
             if settings.LLM_ENABLED:

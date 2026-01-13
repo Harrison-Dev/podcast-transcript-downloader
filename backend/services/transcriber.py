@@ -43,7 +43,35 @@ def convert_to_traditional(text: str) -> str:
 
 def format_transcript_text(segments: list[dict], include_timestamps: bool = False) -> str:
     """
-    Format transcript with better sentence structure.
+    Format transcript as one segment per line (SRT-like format).
+    This format is optimal for LLM batch processing.
+
+    Each segment becomes one line, making it easy to batch by line count
+    (e.g., 8 lines ≈ 300 characters for Chinese text).
+    """
+    if not segments:
+        return ""
+
+    lines = []
+    for seg in segments:
+        text = seg["text"].strip()
+        if not text:
+            continue
+
+        if include_timestamps:
+            start_time = seg.get("start", 0)
+            minutes = int(start_time // 60)
+            seconds = int(start_time % 60)
+            lines.append(f"[{minutes:02d}:{seconds:02d}] {text}")
+        else:
+            lines.append(text)
+
+    return "\n".join(lines)
+
+
+def format_transcript_paragraphs(segments: list[dict], include_timestamps: bool = False) -> str:
+    """
+    Format transcript with paragraph structure (for final output).
     Creates readable paragraphs by:
     1. Breaking based on time gaps between segments (pause > 1.5s = new paragraph)
     2. Breaking at sentence-ending punctuation if available (。！？等)
@@ -51,48 +79,47 @@ def format_transcript_text(segments: list[dict], include_timestamps: bool = Fals
     """
     if not segments:
         return ""
-    
+
     # Strategy: Use time gaps between segments to create natural paragraphs
-    # If there's a pause > PAUSE_THRESHOLD, start a new paragraph
     PAUSE_THRESHOLD = 1.5  # seconds - silence gap that indicates paragraph break
     MAX_PARAGRAPH_CHARS = 500  # Force break if paragraph gets too long
     MIN_PARAGRAPH_CHARS = 100  # Don't break if paragraph is too short
-    
+
     paragraphs = []
     current_paragraph_texts = []
     current_paragraph_start_time = 0
     current_length = 0
     last_end_time = 0
-    
+
     for i, seg in enumerate(segments):
         text = seg["text"].strip()
         if not text:
             continue
-        
+
         start_time = seg.get("start", 0)
         end_time = seg.get("end", 0)
-        
+
         # Calculate gap from previous segment
         gap = start_time - last_end_time if i > 0 else 0
-        
+
         # Decide if we should start a new paragraph
         should_break = False
-        
+
         # Break on significant pause (natural paragraph boundary)
         if gap > PAUSE_THRESHOLD and current_length >= MIN_PARAGRAPH_CHARS:
             should_break = True
-        
+
         # Break if current paragraph is getting too long
         if current_length + len(text) > MAX_PARAGRAPH_CHARS and current_length >= MIN_PARAGRAPH_CHARS:
             should_break = True
-        
+
         # Also check for sentence-ending punctuation at the end of last segment
         if current_paragraph_texts:
             last_text = current_paragraph_texts[-1]
             if last_text and last_text[-1] in '。！？!?.':
                 if current_length >= MIN_PARAGRAPH_CHARS and current_length + len(text) > MAX_PARAGRAPH_CHARS * 0.7:
                     should_break = True
-        
+
         if should_break and current_paragraph_texts:
             # Save current paragraph with optional timestamp
             para_text = "".join(current_paragraph_texts)
@@ -101,21 +128,21 @@ def format_transcript_text(segments: list[dict], include_timestamps: bool = Fals
                 seconds = int(current_paragraph_start_time % 60)
                 para_text = f"[{minutes:02d}:{seconds:02d}] {para_text}"
             paragraphs.append(para_text)
-            
+
             # Start new paragraph
             current_paragraph_texts = []
             current_paragraph_start_time = start_time
             current_length = 0
-        
+
         # Add text to current paragraph
         current_paragraph_texts.append(text)
         current_length += len(text)
         last_end_time = end_time
-        
+
         # Track start time for first segment of paragraph
         if len(current_paragraph_texts) == 1:
             current_paragraph_start_time = start_time
-    
+
     # Don't forget the last paragraph
     if current_paragraph_texts:
         para_text = "".join(current_paragraph_texts)
@@ -124,7 +151,7 @@ def format_transcript_text(segments: list[dict], include_timestamps: bool = Fals
             seconds = int(current_paragraph_start_time % 60)
             para_text = f"[{minutes:02d}:{seconds:02d}] {para_text}"
         paragraphs.append(para_text)
-    
+
     return "\n\n".join(paragraphs)
 
 

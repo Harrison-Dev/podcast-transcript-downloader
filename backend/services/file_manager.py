@@ -140,3 +140,36 @@ def list_existing_transcripts(
     if not show_dir.exists():
         return []
     return [f.name for f in show_dir.glob("*.txt")]
+
+
+def save_raw_transcript(
+    show_title: str,
+    episode: EpisodeInfo,
+    raw_text: str,
+    index: int = 0,
+    base_dir: Optional[Path] = None,
+) -> Path:
+    """
+    Save raw Whisper transcript (before LLM polishing) for debugging.
+
+    Returns:
+        Path to the saved file
+    """
+    show_dir = get_show_directory(show_title, base_dir)
+
+    # Episode number
+    ep_num = episode.episode_number or (index + 1)
+    ep_str = f"{ep_num:03d}"
+
+    # Date
+    if episode.publish_date:
+        date_str = episode.publish_date.strftime("%Y-%m-%d")
+    else:
+        date_str = datetime.now().strftime("%Y-%m-%d")
+
+    filename = f".{ep_str}_raw_{date_str}.txt"
+    path = show_dir / filename
+
+    path.write_text(raw_text, encoding="utf-8")
+
+    return path

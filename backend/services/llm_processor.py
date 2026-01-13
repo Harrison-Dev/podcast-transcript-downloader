@@ -195,10 +195,35 @@ def format_time(seconds: float) -> str:
 
 def clean_response(text: str) -> str:
     """Remove model-specific artifacts from response."""
-    # Remove <think>...</think> blocks
+    if not text:
+        return ""
+
+    # Remove <think>...</think> blocks (Qwen thinking mode)
     text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL)
+
     # Remove markdown code blocks
     text = re.sub(r'```.*?```', '', text, flags=re.DOTALL)
+
+    # Remove common prompt leakage patterns
+    patterns_to_remove = [
+        r'^(請|只|以下).*?(輸出|說明|整理|加入).*?[：:]\s*',  # Prompt instructions at start
+        r'(請|只)輸出.*?[：:].*$',  # Trailing prompt instructions
+        r'^(好的|沒問題|以下是).*?[：:]\s*',  # Model preamble
+        r'^整理後.*?[：:]\s*',  # "整理後的文章："
+    ]
+
+    for pattern in patterns_to_remove:
+        text = re.sub(pattern, '', text, flags=re.MULTILINE)
+
+    # Remove markdown headers
+    text = re.sub(r'^#+\s+.*$', '', text, flags=re.MULTILINE)
+
+    # Remove horizontal rules
+    text = re.sub(r'^[-=_]{3,}$', '', text, flags=re.MULTILINE)
+
+    # Clean up excessive newlines
+    text = re.sub(r'\n{3,}', '\n\n', text)
+
     return text.strip()
 
 

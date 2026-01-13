@@ -139,32 +139,43 @@ async def websocket_progress(websocket: WebSocket, job_id: str):
     """
     orchestrator = get_orchestrator()
     job = orchestrator.get_job(job_id)
-    
+
     if not job:
         await websocket.close(code=4004, reason="Job not found")
         return
-    
+
     await manager.connect(job_id, websocket)
-    
+
     # Send initial status
     try:
         await websocket.send_json(job.get_progress().model_dump())
     except Exception:
         manager.disconnect(job_id, websocket)
         return
-    
-    # Set up progress callback
-    async def send_progress(progress: JobProgress):
-        try:
-            await websocket.send_json(progress.model_dump())
-        except Exception:
-            pass
-    
+
+    # Get the current event loop for thread-safe callback scheduling
+    loop = asyncio.get_running_loop()
+
+    # Set up progress callback (called from ThreadPoolExecutor)
     def progress_callback(progress: JobProgress):
-        asyncio.create_task(send_progress(progress))
-    
+        """Thread-safe callback that schedules WebSocket send on the main event loop."""
+        async def send_progress():
+            try:
+                await websocket.send_json(progress.model_dump())
+            except Exception:
+                pass
+
+        # Schedule the coroutine on the main event loop (thread-safe)
+        try:
+            loop.call_soon_threadsafe(
+                lambda: asyncio.ensure_future(send_progress(), loop=loop)
+            )
+        except RuntimeError:
+            # Loop might be closed
+            pass
+
     job.add_progress_callback(progress_callback)
-    
+
     try:
         while True:
             # Keep connection alive, handle any client messages
@@ -182,10 +193,10 @@ async def websocket_progress(websocket: WebSocket, job_id: str):
                     await websocket.send_json(job.get_progress().model_dump())
                 except Exception:
                     break
-    
+
     except WebSocketDisconnect:
         pass
-    
+
     finally:
         job.remove_progress_callback(progress_callback)
         manager.disconnect(job_id, websocket)
