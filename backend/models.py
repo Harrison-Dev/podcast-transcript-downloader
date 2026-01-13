@@ -36,6 +36,11 @@ class ShowInfo(BaseModel):
     episodes: list[EpisodeInfo] = []
 
 
+class OutputFormat(str, Enum):
+    TXT = "txt"
+    MARKDOWN = "md"
+
+
 class TranscriptionRequest(BaseModel):
     """Request to start a transcription job."""
     rss_url: HttpUrl
@@ -43,6 +48,7 @@ class TranscriptionRequest(BaseModel):
     output_dir: Optional[str] = None
     skip_existing: bool = True
     language: Optional[str] = None  # Auto-detect if None
+    output_format: OutputFormat = OutputFormat.TXT  # txt or md
 
 
 class EpisodeProgress(BaseModel):

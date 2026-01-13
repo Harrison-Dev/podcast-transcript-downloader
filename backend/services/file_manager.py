@@ -39,25 +39,32 @@ def sanitize_filename(name: str, max_length: int = 100) -> str:
 def generate_transcript_filename(
     episode: EpisodeInfo,
     index: int = 0,
+    output_format: str = "txt",
 ) -> str:
     """
     Generate a transcript filename from episode info.
-    Format: {episode_number}_{title}_{YYYY-MM-DD}.txt
+    Format: {episode_number}_{title}_{YYYY-MM-DD}.{ext}
+
+    Args:
+        episode: Episode information
+        index: Episode index (fallback for episode number)
+        output_format: Output format - "txt" or "md"
     """
     # Episode number
     ep_num = episode.episode_number or (index + 1)
     ep_str = f"{ep_num:03d}"
-    
+
     # Title (sanitized)
     title = sanitize_filename(episode.title, max_length=80)
-    
+
     # Date
     if episode.publish_date:
         date_str = episode.publish_date.strftime("%Y-%m-%d")
     else:
         date_str = datetime.now().strftime("%Y-%m-%d")
-    
-    return f"{ep_str}_{title}_{date_str}.txt"
+
+    ext = "md" if output_format == "md" else "txt"
+    return f"{ep_str}_{title}_{date_str}.{ext}"
 
 
 def get_show_directory(show_title: str, base_dir: Optional[Path] = None) -> Path:
@@ -74,10 +81,11 @@ def get_transcript_path(
     episode: EpisodeInfo,
     index: int = 0,
     base_dir: Optional[Path] = None,
+    output_format: str = "txt",
 ) -> Path:
     """Get the full path for a transcript file."""
     show_dir = get_show_directory(show_title, base_dir)
-    filename = generate_transcript_filename(episode, index)
+    filename = generate_transcript_filename(episode, index, output_format)
     return show_dir / filename
 
 
@@ -99,35 +107,60 @@ def save_transcript(
     index: int = 0,
     base_dir: Optional[Path] = None,
     include_metadata: bool = True,
+    output_format: str = "txt",
 ) -> Path:
     """
     Save transcript to file with optional metadata header.
-    
+
+    Args:
+        show_title: Podcast show name
+        episode: Episode information
+        transcript_text: The transcript content
+        index: Episode index
+        base_dir: Base output directory
+        include_metadata: Whether to include metadata header
+        output_format: "txt" or "md" (markdown)
+
     Returns:
         Path to the saved file
     """
-    path = get_transcript_path(show_title, episode, index, base_dir)
-    
+    path = get_transcript_path(show_title, episode, index, base_dir, output_format)
+
     content_parts = []
-    
+
     if include_metadata:
-        content_parts.append(f"# {episode.title}")
-        content_parts.append(f"# Show: {show_title}")
-        if episode.publish_date:
-            content_parts.append(f"# Date: {episode.publish_date.strftime('%Y-%m-%d')}")
-        if episode.duration:
-            minutes = episode.duration // 60
-            content_parts.append(f"# Duration: {minutes} minutes")
-        content_parts.append("")
-        content_parts.append("-" * 50)
-        content_parts.append("")
-    
+        if output_format == "md":
+            # Markdown format with proper headers
+            content_parts.append(f"# {episode.title}")
+            content_parts.append("")
+            content_parts.append(f"**節目：** {show_title}")
+            if episode.publish_date:
+                content_parts.append(f"**日期：** {episode.publish_date.strftime('%Y-%m-%d')}")
+            if episode.duration:
+                minutes = episode.duration // 60
+                content_parts.append(f"**時長：** {minutes} 分鐘")
+            content_parts.append("")
+            content_parts.append("---")
+            content_parts.append("")
+        else:
+            # Plain text format (original)
+            content_parts.append(f"# {episode.title}")
+            content_parts.append(f"# Show: {show_title}")
+            if episode.publish_date:
+                content_parts.append(f"# Date: {episode.publish_date.strftime('%Y-%m-%d')}")
+            if episode.duration:
+                minutes = episode.duration // 60
+                content_parts.append(f"# Duration: {minutes} minutes")
+            content_parts.append("")
+            content_parts.append("-" * 50)
+            content_parts.append("")
+
     content_parts.append(transcript_text)
-    
+
     full_content = "\n".join(content_parts)
-    
+
     path.write_text(full_content, encoding="utf-8")
-    
+
     return path
 
 

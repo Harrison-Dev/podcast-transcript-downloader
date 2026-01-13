@@ -19,6 +19,7 @@ function App() {
     const [outputDir, setOutputDir] = useState('./transcripts')
     const [skipExisting, setSkipExisting] = useState(true)
     const [language, setLanguage] = useState('')
+    const [outputFormat, setOutputFormat] = useState('md')
 
     // Job state
     const [jobId, setJobId] = useState(null)
@@ -112,6 +113,7 @@ function App() {
                     output_dir: outputDir || null,
                     skip_existing: skipExisting,
                     language: language || null,
+                    output_format: outputFormat,
                 }),
             })
 
@@ -236,6 +238,20 @@ function App() {
                                 onChange={(e) => setLanguage(e.target.value)}
                                 disabled={isRunning}
                             />
+                        </div>
+
+                        <div className="form-group">
+                            <label className="form-label" htmlFor="output-format">Output Format</label>
+                            <select
+                                id="output-format"
+                                className="form-input"
+                                value={outputFormat}
+                                onChange={(e) => setOutputFormat(e.target.value)}
+                                disabled={isRunning}
+                            >
+                                <option value="md">Markdown (.md)</option>
+                                <option value="txt">Plain Text (.txt)</option>
+                            </select>
                         </div>
                     </div>
 

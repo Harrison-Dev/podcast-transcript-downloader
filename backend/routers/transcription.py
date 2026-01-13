@@ -35,6 +35,7 @@ async def start_transcription(request: TranscriptionRequest):
         output_dir=request.output_dir,
         skip_existing=request.skip_existing,
         language=request.language,
+        output_format=request.output_format.value,
     )
     
     # Start processing in background
@@ -86,11 +87,12 @@ async def preview_rss(request: TranscriptionRequest):
     will_process = []
     will_skip = []
     
+    output_format = request.output_format.value
     for idx, episode in enumerate(show.episodes):
         if request.skip_existing and transcript_exists(
             show.title, episode, idx, output_dir
         ):
-            path = get_transcript_path(show.title, episode, idx, output_dir)
+            path = get_transcript_path(show.title, episode, idx, output_dir, output_format)
             will_skip.append(path.name)
         else:
             will_process.append(episode)

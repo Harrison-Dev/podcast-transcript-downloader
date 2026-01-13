@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 class TranscriptionJob:
     """Represents a single transcription job with its state."""
-    
+
     def __init__(
         self,
         job_id: str,
@@ -37,6 +37,7 @@ class TranscriptionJob:
         output_dir: Optional[Path],
         skip_existing: bool,
         language: Optional[str],
+        output_format: str = "txt",
     ):
         self.job_id = job_id
         self.rss_url = rss_url
@@ -44,6 +45,7 @@ class TranscriptionJob:
         self.output_dir = output_dir or settings.OUTPUT_BASE_DIR
         self.skip_existing = skip_existing
         self.language = language
+        self.output_format = output_format  # "txt" or "md"
         
         # State
         self.status = JobStatus.PENDING
@@ -104,10 +106,11 @@ class PipelineOrchestrator:
         output_dir: Optional[str] = None,
         skip_existing: bool = True,
         language: Optional[str] = None,
+        output_format: str = "txt",
     ) -> TranscriptionJob:
         """Create a new transcription job."""
         job_id = str(uuid.uuid4())[:8]
-        
+
         job = TranscriptionJob(
             job_id=job_id,
             rss_url=rss_url,
@@ -115,8 +118,9 @@ class PipelineOrchestrator:
             output_dir=Path(output_dir) if output_dir else None,
             skip_existing=skip_existing,
             language=language,
+            output_format=output_format,
         )
-        
+
         self.jobs[job_id] = job
         return job
     
@@ -334,6 +338,7 @@ class PipelineOrchestrator:
                 final_text,
                 index,
                 job.output_dir,
+                output_format=job.output_format,
             )
             
             job.completed_episodes += 1
